@@ -945,7 +945,7 @@ extern "C" uintptr_t pluginEntry( _NT_selector selector, uint32_t data )
 	switch ( selector )
 	{
 	case kNT_selector_version:
-		return kNT_apiVersionCurrent;
+		return kNT_apiVersion14;	// newest feature used: filesystem API (added after v14). Nothing from v15/v16.
 	case kNT_selector_numFactories:
 		return 1;
 	case kNT_selector_factoryInfo:

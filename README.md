@@ -74,6 +74,11 @@ The display shows the capture, its loudness and calibration level, and
 input/output meters. Presets store the model **by file name**, so adding or
 renaming other files doesn't change which capture a preset loads.
 
+## Requirements
+
+The plug-in declares API v14 and uses the filesystem API that was added to
+the plug-in API in October 2026 (after v14). Use the latest disting NT firmware.
+
 ## Sample rate
 
 A2 captures are trained at 48 kHz.
@@ -101,7 +106,7 @@ Plug-in code: about 19 KB.
 ## Build
 
 ```sh
-git clone https://github.com/expertsleepersltd/distingNT_API   # API v16+
+git clone https://github.com/expertsleepersltd/distingNT_API   # needs file.h (filesystem API)
 make NT_API_PATH=path/to/distingNT_API      # -> plugins/nam_nt.o
 make test   NT_API_PATH=...                 # host build of the test harness
 ```
