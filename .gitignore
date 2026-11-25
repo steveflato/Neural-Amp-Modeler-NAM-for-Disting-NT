@@ -1,0 +1,4 @@
+build/
+test/*.o
+test/host_test
+test/ref_engine
