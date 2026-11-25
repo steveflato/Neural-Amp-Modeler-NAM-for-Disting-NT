@@ -101,6 +101,7 @@ void* NT_getFileScratchBuffer( size_t& size ) { size = sizeof g_scratch; return 
 void NT_drawText( int, int, const char*, int, _NT_textAlignment, _NT_textSize ) {}
 void NT_drawShapeI( _NT_shape, int, int, int, int, int ) {}
 int NT_floatToString( char* b, float v, int dp ) { return sprintf( b, "%.*f", dp, v ); }
+int NT_intToString( char* b, int32_t v ) { return sprintf( b, "%d", (int)v ); }
 }
 void _NT_jsonStream::addMemberName( const char* ) {}
 void _NT_jsonStream::addString( const char* ) {}

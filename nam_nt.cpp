@@ -58,7 +58,7 @@ enum
 };
 
 static char const * const offOn[] = { "Off", "On", NULL };
-static char const * const stereoModes[] = { "Dual", "Summed", NULL };
+static char const * const stereoModes[] = { "Dual 2xCPU", "Summed", NULL };
 enum { kStereoDual, kStereoSummed };
 
 static const _NT_parameter parameters[] = {
@@ -69,7 +69,7 @@ static const _NT_parameter parameters[] = {
 	{ .name = "Calibrate in", .min = 0, .max = 1, .def = 1, .unit = kNT_unitEnum, .scaling = 0, .enumStrings = offOn },
 	{ .name = "Normalize out", .min = 0, .max = 1, .def = 1, .unit = kNT_unitEnum, .scaling = 0, .enumStrings = offOn },
 	{ .name = "Gate", .min = -90, .max = -30, .def = -90, .unit = kNT_unitDb_minInf, .scaling = 0, .enumStrings = NULL },
-	{ .name = "Stereo mode", .min = 0, .max = 1, .def = kStereoDual, .unit = kNT_unitEnum, .scaling = 0, .enumStrings = stereoModes },
+	{ .name = "Stereo mode", .min = 0, .max = 1, .def = kStereoSummed, .unit = kNT_unitEnum, .scaling = 0, .enumStrings = stereoModes },
 	NT_PARAMETER_AUDIO_INPUT( "Input", 1, 1 )
 	NT_PARAMETER_AUDIO_INPUT( "Input R", 0, 2 )
 	NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE( "Output", 1, 13 )
@@ -211,6 +211,10 @@ struct _namAlgorithm : public _NT_algorithm
 	float			gateThresh;			// linear, 0 = off
 	float			env, gateGain;
 	float			inPeak, outPeak;	// meters
+	// profiling: engine cycles per model sample (per engine), and host block size
+	uint32_t		profCycles, profSamples;
+	int				cyclesPerSample;
+	int				blockFrames;
 	// 96k: dry path delayed to match the resampler latency (61 samples)
 	float			dryBuf[ 2 ][ 64 ];
 	int				dryPos;
@@ -493,6 +497,9 @@ static _NT_algorithm* construct( const _NT_algorithmMemoryPtrs& ptrs, const _NT_
 	p->inPeak = p->outPeak = 0.0f;
 	memset( p->dryBuf, 0, sizeof p->dryBuf );
 	p->dryPos = 0;
+	p->profCycles = p->profSamples = 0;
+	p->cyclesPerSample = 0;
+	p->blockFrames = 0;
 	return p;
 }
 
@@ -731,6 +738,7 @@ static void step( _NT_algorithm* self, float* busFrames, int numFramesBy4 )
 		p->gateGain = gg;
 
 		// --- model(s) ---
+		uint32_t t0 = NT_getCpuCycleCount();
 		for ( int e = 0; e < engines; ++e )
 		{
 			NamChan& ch = h->ch[e];
@@ -742,6 +750,11 @@ static void step( _NT_algorithm* self, float* busFrames, int numFramesBy4 )
 			}
 			else
 				memset( ch.out, 0, m * sizeof(float) );
+		}
+		if ( running )
+		{
+			p->profCycles += NT_getCpuCycleCount() - t0;
+			p->profSamples += m * engines;
 		}
 
 		// --- back up to host rate, gain, mix ---
@@ -810,6 +823,12 @@ static void step( _NT_algorithm* self, float* busFrames, int numFramesBy4 )
 
 	p->inPeak = inPeak;
 	p->outPeak = outPeak;
+	p->blockFrames = numFrames;
+	if ( p->profSamples >= 24000 )		// update about every half second
+	{
+		p->cyclesPerSample = (int)( p->profCycles / p->profSamples );
+		p->profCycles = p->profSamples = 0;
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -867,6 +886,18 @@ static bool draw( _NT_algorithm* self )
 			strcpy( buf + len, p->v[ kParamCalibrate ] ? "dBu cal" : "dBu (off)" );
 			NT_drawText( x, 42, buf, 6 );
 		}
+	}
+	// profiler: engine cycles per sample and host block size
+	if ( p->cyclesPerSample > 0 )
+	{
+		int len = NT_intToString( buf, p->cyclesPerSample );
+		strcpy( buf + len, " cyc/smp" );
+		NT_drawText( 0, 52, buf, 6 );
+	}
+	{
+		memcpy( buf, "blk ", 4 );
+		NT_intToString( buf + 4, p->blockFrames );
+		NT_drawText( 80, 52, buf, 6 );
 	}
 	if ( p->sampleRateWarn )
 		NT_drawText( 150, 20, "SR not 48k!", 15 );

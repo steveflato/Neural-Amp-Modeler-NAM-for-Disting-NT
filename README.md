@@ -59,16 +59,20 @@ loads in a single pass with no large buffer.
   these become **Input L / Input R / Output L / Output R**, each output with
   its own mode.
 - **Stereo mode** (stereo specification only):
-  - **Dual**: L and R each go through their own copy of the capture. This is
-    true stereo, but it uses **2× the CPU**.
-  - **Summed**: (L + R) / 2 goes through one copy, the wet signal goes to both
-    outputs, and the dry signal stays stereo. It uses 1× the CPU, like a mono amp
-    in a stereo rig.
+  - **Dual 2xCPU**: L and R each go through their own copy of the capture.
+    This is true stereo, but it uses **2× the CPU**. That **overloads the NT**
+    at the moment (one copy measures about 56%).
+  - **Summed** (default): (L + R) / 2 goes through one copy, the wet signal
+    goes to both outputs, and the dry signal stays stereo. It uses 1× the CPU,
+    like a mono amp in a stereo rig.
   - With **Input R = None**, the setup is mono in and stereo out. One copy runs,
     and the wet signal goes to both outputs.
   - **Output R = None** gives stereo in to mono out on L.
 - **Drive CV**: an optional CV input that adds input gain at +6 dB per volt.
   It's read once per block.
+
+The display also shows a profiler line: the engine's **cycles per sample** and
+the NT's **block size**. Please include those numbers in any performance report.
 
 The display shows the capture, its loudness and calibration level, and
 input/output meters. Presets store the model **by file name**, so adding or
@@ -130,8 +134,8 @@ local folder standing in for the SD card. `test/run_tests.sh` runs all of it:
 - **Behaviour**: preset recall by name, switching while running, bad files
   muting and reporting, recovery, mix, and gain staging maths, all at 48 and 96 kHz.
 
-Not yet tested on hardware. The first things to check on a real module are
-the CPU load (shown on the NT's CPU page), especially in stereo Dual, and that the DTC allocation is granted.
+Hardware: on a disting NT at 48 kHz, one copy (mono or Summed) uses about
+**55.6% CPU**, so Dual (two copies) overloads it.
 
 ## Licences
 
