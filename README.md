@@ -1,4 +1,4 @@
-# NAM for disting NT
+# Neural Amp Modeler (NAM) for Disting NT
 
 A disting NT plug-in that runs **Neural Amp Modeler A2-Lite** captures, the
 kind you download from [TONE3000](https://www.tone3000.com). Put the `.nam`
