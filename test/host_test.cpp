@@ -3,7 +3,7 @@
 // (a local folder standing in for /nam).
 //
 //   host_test parse  <file.nam> <ref_weights.f32>        streaming parser vs Python json
-//   host_test render <namdir> <model index> <in.f32> <out.f32> [block]
+//   host_test render <namdir> <model> <spec 1|2> <inL> <inR|-> <outL> <outR|-> [block]
 //        renders mono float32 (volts) through the plugin at NT_SR (env, default 48000)
 //        with calibration/normalisation off, unity gains, 100% wet
 
@@ -160,7 +160,7 @@ static int doParse( const char* nam, const char* ref )
 	return fails ? 1 : 0;
 }
 
-static int doRender( const char* dir, int model, int spec, int stereoMode, const char* inPath, const char* inRPath,
+static int doRender( const char* dir, int model, int spec, const char* inPath, const char* inRPath,
 		const char* outPath, const char* outRPath, int block )
 {
 	g_namDir = dir;
@@ -183,7 +183,6 @@ static int doRender( const char* dir, int model, int spec, int stereoMode, const
 	g_v[ kParamCalibrate ] = 0;
 	g_v[ kParamNormalize ] = 0;
 	g_v[ kParamModel ] = model;
-	g_v[ kParamStereoMode ] = stereoMode;
 	g_v[ kParamInputR ] = strcmp( inRPath, "-" ) ? 2 : 0;
 	g_v[ kParamOutputR ] = strcmp( outRPath, "-" ) ? 14 : 0;
 	for ( int i = 0; i < kNumParams; ++i ) g_factory->parameterChanged( g_alg, i );
@@ -323,10 +322,10 @@ int main( int argc, char** argv )
 		return doMisc( argv[2] );
 	if ( argc >= 4 && !strcmp( argv[1], "parse" ) )
 		return doParse( argv[2], argv[3] );
-	// render <dir> <model> <spec 1|2> <stereo mode 0 dual|1 summed> <inL> <inR|-> <outL> <outR|-> [block]
-	if ( argc >= 10 && !strcmp( argv[1], "render" ) )
-		return doRender( argv[2], atoi( argv[3] ), atoi( argv[4] ), atoi( argv[5] ), argv[6], argv[7], argv[8], argv[9],
-			argc > 10 ? atoi( argv[10] ) : 24 );
+	// render <dir> <model> <spec 1|2> <inL> <inR|-> <outL> <outR|-> [block]
+	if ( argc >= 9 && !strcmp( argv[1], "render" ) )
+		return doRender( argv[2], atoi( argv[3] ), atoi( argv[4] ), argv[5], argv[6], argv[7], argv[8],
+			argc > 9 ? atoi( argv[9] ) : 24 );
 	fprintf( stderr, "usage: see source\n" );
 	return 2;
 }

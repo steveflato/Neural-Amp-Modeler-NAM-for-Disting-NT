@@ -45,7 +45,6 @@ enum
 	kParamCalibrate,
 	kParamNormalize,
 	kParamGate,
-	kParamStereoMode,
 	kParamInput,
 	kParamInputR,
 	kParamOutput,
@@ -58,8 +57,6 @@ enum
 };
 
 static char const * const offOn[] = { "Off", "On", NULL };
-static char const * const stereoModes[] = { "Dual 2xCPU", "Summed", NULL };
-enum { kStereoDual, kStereoSummed };
 
 static const _NT_parameter parameters[] = {
 	{ .name = "Model", .min = 0, .max = 32767, .def = 0, .unit = kNT_unitConfirm, .scaling = 0, .enumStrings = NULL },
@@ -69,7 +66,6 @@ static const _NT_parameter parameters[] = {
 	{ .name = "Calibrate in", .min = 0, .max = 1, .def = 1, .unit = kNT_unitEnum, .scaling = 0, .enumStrings = offOn },
 	{ .name = "Normalize out", .min = 0, .max = 1, .def = 1, .unit = kNT_unitEnum, .scaling = 0, .enumStrings = offOn },
 	{ .name = "Gate", .min = -90, .max = -30, .def = -90, .unit = kNT_unitDb_minInf, .scaling = 0, .enumStrings = NULL },
-	{ .name = "Stereo mode", .min = 0, .max = 1, .def = kStereoSummed, .unit = kNT_unitEnum, .scaling = 0, .enumStrings = stereoModes },
 	NT_PARAMETER_AUDIO_INPUT( "Input", 1, 1 )
 	NT_PARAMETER_AUDIO_INPUT( "Input R", 0, 2 )
 	NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE( "Output", 1, 13 )
@@ -80,7 +76,7 @@ static const _NT_parameter parameters[] = {
 static const uint8_t pageModel[] = { kParamModel, kParamInputGain, kParamOutputGain, kParamMix };
 static const uint8_t pageLevels[] = { kParamCalibrate, kParamNormalize, kParamGate };
 static const uint8_t pageRoutingMono[] = { kParamInput, kParamOutput, kParamOutputMode, kParamDriveCv };
-static const uint8_t pageRoutingStereo[] = { kParamStereoMode, kParamInput, kParamInputR, kParamOutput, kParamOutputMode,
+static const uint8_t pageRoutingStereo[] = { kParamInput, kParamInputR, kParamOutput, kParamOutputMode,
 		kParamOutputR, kParamOutputRMode, kParamDriveCv };
 
 static const _NT_parameterPage pagesMono[] = {
@@ -182,8 +178,8 @@ struct _namAlgorithm : public _NT_algorithm
 
 	NamHot*					hot;
 	NamCold*				cold;
-	nam_a2lite_state_t*		state;		// ring buffers (SRAM), [numChannels]
-	int						numChannels;
+	nam_a2lite_state_t*		state;		// ring buffers (SRAM)
+	int						numChannels;	// routing: 1 = mono, 2 = stereo in/out
 
 	// file system / loading state machine
 	bool			cardMounted;
@@ -412,14 +408,11 @@ static void loadCallback( void* data )
 	if ( !err )
 	{
 		// bind, clear and prewarm (not real time - fine here, audio is muted)
-		for ( int c = 0; c < p->numChannels; ++c )
-		{
-			NamChan& ch = p->hot->ch[c];
-			nam_a2lite_init( &ch.inst, &p->hot->weights, p->state + c );
-			nam_a2lite_prewarm( &ch.inst );
-			ch.down.reset();
-			ch.up.reset();
-		}
+		NamChan& ch = p->hot->ch[0];
+		nam_a2lite_init( &ch.inst, &p->hot->weights, p->state );
+		nam_a2lite_prewarm( &ch.inst );
+		ch.down.reset();
+		ch.up.reset();
 		p->env = 0.0f;
 		p->gateGain = 1.0f;
 		copyName( p->modelName, name );
@@ -447,11 +440,11 @@ static void loadCallback( void* data )
 
 static void calculateRequirements( _NT_algorithmRequirements& req, const int32_t* specifications )
 {
-	int channels = specifications[0] == 2 ? 2 : 1;
+	// one engine in both specifications: stereo sums L+R into it
 	req.numParameters = kNumParams;
-	req.sram = sizeof(_namAlgorithm) + channels * sizeof(nam_a2lite_state_t) + 32;
+	req.sram = sizeof(_namAlgorithm) + sizeof(nam_a2lite_state_t) + 32;
 	req.dram = sizeof(NamCold) + 32;
-	req.dtc = hotSize( channels ) + 32;
+	req.dtc = hotSize( 1 ) + 32;
 	req.itc = 0;
 }
 
@@ -466,8 +459,8 @@ static _NT_algorithm* construct( const _NT_algorithmMemoryPtrs& ptrs, const _NT_
 	p->state = (nam_a2lite_state_t*)align32( ptrs.sram + sizeof(_namAlgorithm) );
 	p->hot = (NamHot*)align32( ptrs.dtc );
 	p->cold = (NamCold*)align32( ptrs.dram );
-	memset( p->hot, 0, hotSize( p->numChannels ) );
-	memset( p->state, 0, p->numChannels * sizeof(nam_a2lite_state_t) );
+	memset( p->hot, 0, hotSize( 1 ) );
+	memset( p->state, 0, sizeof(nam_a2lite_state_t) );
 
 	memcpy( p->params, parameters, sizeof parameters );
 	if ( p->numChannels == 2 )
@@ -631,10 +624,8 @@ static void step( _NT_algorithm* self, float* busFrames, int numFramesBy4 )
 
 	// ---- routing ----
 	// Mono spec: one input, one output.
-	// Stereo spec: Input R / Output R may be None.
-	//   Dual:   L and R through their own engines (true stereo, 2x CPU)
-	//   Summed: (L+R)/2 through one engine, wet to both sides, dry stays stereo
-	//   No Input R: mono in, the wet signal goes to both outputs.
+	// Stereo spec: (L+R)/2 through the engine, wet to both sides, dry stays stereo.
+	//   Input R = None: mono in, wet to both outputs. Output R = None: mono out on L.
 	const bool stereo = p->numChannels == 2;
 	const int vInL = p->v[ kParamInput ], vOutL = p->v[ kParamOutput ];
 	const int vInR = stereo ? p->v[ kParamInputR ] : 0;
@@ -650,8 +641,7 @@ static void step( _NT_algorithm* self, float* busFrames, int numFramesBy4 )
 	if ( !outL && !outR )
 		return;
 
-	const int engines = ( stereo && inR && p->v[ kParamStereoMode ] == kStereoDual ) ? 2 : 1;
-	const float sumScale = ( inL && inR && engines == 1 ) ? 0.5f : 1.0f;
+	const float sumScale = ( inL && inR ) ? 0.5f : 1.0f;
 
 	const bool running = p->engineReady;
 	// fade out ahead of a load, fade in after one (about 10 ms)
@@ -670,7 +660,6 @@ static void step( _NT_algorithm* self, float* busFrames, int numFramesBy4 )
 
 	NamHot* h = p->hot;
 	NamChan& c0 = h->ch[0];
-	NamChan& c1 = h->ch[ engines == 2 ? 1 : 0 ];
 	float inPeak = p->inPeak * 0.95f, outPeak = p->outPeak * 0.95f;
 
 	// flush denormals to zero and use default NaN while the engine runs
@@ -701,91 +690,60 @@ static void step( _NT_algorithm* self, float* busFrames, int numFramesBy4 )
 			ig += smooth * ( inTarget - ig );
 			float l = xl ? xl[i] : 0.0f;
 			float r = xr ? xr[i] : 0.0f;
-			float a, b;
-			if ( engines == 2 ) { a = l * ig; b = r * ig; }
-			else { a = ( l + r ) * sumScale * ig; b = 0.0f; }
-			float pk = __builtin_fabsf( a ) > __builtin_fabsf( b ) ? __builtin_fabsf( a ) : __builtin_fabsf( b );
+			float a = ( l + r ) * sumScale * ig;
+			float pk = __builtin_fabsf( a );
 			if ( pk > inPeak ) inPeak = pk;
-			// gate on the model input: fast attack, slow release, both sides together
+			// gate on the model input: fast attack, slow release
 			if ( gateThresh > 0.0f )
 			{
 				env = pk > env ? pk : env * 0.9995f;
 				float tgt = env > gateThresh ? 1.0f : 0.0f;
 				gg += ( tgt > gg ? 0.01f : 0.0005f ) * ( tgt - gg );
 				a *= gg;
-				b *= gg;
 			}
 			if ( is96k )
 			{
 				c0.down.push( a );
-				if ( engines == 2 ) c1.down.push( b );
 				if ( i & 1 )
-				{
-					c0.in[ m ] = c0.down.filter();
-					if ( engines == 2 ) c1.in[ m ] = c1.down.filter();
-					++m;
-				}
+					c0.in[ m++ ] = c0.down.filter();
 			}
 			else
-			{
-				c0.in[ m ] = a;
-				if ( engines == 2 ) c1.in[ m ] = b;
-				++m;
-			}
+				c0.in[ m++ ] = a;
 		}
 		p->inGain = ig;
 		p->env = env;
 		p->gateGain = gg;
 
-		// --- model(s) ---
-		uint32_t t0 = NT_getCpuCycleCount();
-		for ( int e = 0; e < engines; ++e )
-		{
-			NamChan& ch = h->ch[e];
-			if ( running )
-			{
-				const float* ins[1] = { ch.in };
-				float* outs[1] = { ch.out };
-				nam_a2lite_process( &ch.inst, ins, outs, m );
-			}
-			else
-				memset( ch.out, 0, m * sizeof(float) );
-		}
+		// --- model ---
 		if ( running )
 		{
+			uint32_t t0 = NT_getCpuCycleCount();
+			const float* ins[1] = { c0.in };
+			float* outs[1] = { c0.out };
+			nam_a2lite_process( &c0.inst, ins, outs, m );
 			p->profCycles += NT_getCpuCycleCount() - t0;
-			p->profSamples += m * engines;
+			p->profSamples += m;
 		}
+		else
+			memset( c0.out, 0, m * sizeof(float) );
 
 		// --- back up to host rate, gain, mix ---
 		float og = p->outGain, fade = p->fade;
 		for ( int i = 0; i < n; ++i )
 		{
-			float wl, wr;
+			float w;
 			if ( is96k )
 			{
 				c0.up.push( ( i & 1 ) ? 0.0f : 2.0f * c0.out[ i >> 1 ] );
-				wl = c0.up.filter();
-				if ( engines == 2 )
-				{
-					c1.up.push( ( i & 1 ) ? 0.0f : 2.0f * c1.out[ i >> 1 ] );
-					wr = c1.up.filter();
-				}
-				else
-					wr = wl;
+				w = c0.up.filter();
 			}
 			else
-			{
-				wl = c0.out[i];
-				wr = engines == 2 ? c1.out[i] : wl;
-			}
+				w = c0.out[i];
 			og += smooth * ( p->outGainTarget - og );
 			fade += fade < fadeTarget ? fadeStep : ( fade > fadeTarget ? -fadeStep : 0.0f );
 			fade = fade < 0.0f ? 0.0f : ( fade > 1.0f ? 1.0f : fade );
-			float g = og * fade;
-			wl *= g;
-			wr *= g;
-			float pk = __builtin_fabsf( wl ) > __builtin_fabsf( wr ) ? __builtin_fabsf( wl ) : __builtin_fabsf( wr );
+			w *= og * fade;
+			float pk = __builtin_fabsf( w );
 			if ( pk > outPeak ) outPeak = pk;
 
 			float dl = xl ? xl[i] : 0.0f;
@@ -802,12 +760,12 @@ static void step( _NT_algorithm* self, float* busFrames, int numFramesBy4 )
 			}
 			if ( outL )
 			{
-				float o = dl + mix * ( wl - dl );
+				float o = dl + mix * ( w - dl );
 				if ( replaceL ) outL[ done + i ] = o; else outL[ done + i ] += o;
 			}
 			if ( outR )
 			{
-				float o = dr + mix * ( wr - dr );
+				float o = dr + mix * ( w - dr );
 				if ( replaceR ) outR[ done + i ] = o; else outR[ done + i ] += o;
 			}
 		}
@@ -853,8 +811,7 @@ static bool draw( _NT_algorithm* self )
 
 	const char* title = "NAM";
 	if ( p->numChannels == 2 )
-		title = !p->v[ kParamInputR ] ? "NAM  mono > stereo"
-			: ( p->v[ kParamStereoMode ] == kStereoDual ? "NAM  stereo (dual)" : "NAM  stereo (summed)" );
+		title = p->v[ kParamInputR ] ? "NAM  stereo (summed)" : "NAM  mono > stereo";
 	NT_drawText( 0, 20, title, 15 );
 
 	const char* line;

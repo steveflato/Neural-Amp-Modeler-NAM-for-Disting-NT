@@ -51,23 +51,21 @@ loads in a single pass with no large buffer.
 - **Normalize out** (default On): uses the capture's `loudness` to bring it to
   −18 dB, clamped to ±12 dB, so switching captures doesn't jump in level.
   This is the same gain staging as the NAM plug-in and the TONE3000 pedal.
-- **Gate**: a noise gate on the model input. Fully down is off. In stereo
-  the two sides are linked, so both open and close together.
+- **Gate**: a noise gate on the model input. Fully down is off.
 
 **Routing page**
 - **Input / Output / Output mode**: the usual. With the stereo specification
   these become **Input L / Input R / Output L / Output R**, each output with
   its own mode.
-- **Stereo mode** (stereo specification only):
-  - **Dual 2xCPU**: L and R each go through their own copy of the capture.
-    This is true stereo, but it uses **2× the CPU**. That **overloads the NT**
-    at the moment (one copy measures about 56%).
-  - **Summed** (default): (L + R) / 2 goes through one copy, the wet signal
-    goes to both outputs, and the dry signal stays stereo. It uses 1× the CPU,
-    like a mono amp in a stereo rig.
-  - With **Input R = None**, the setup is mono in and stereo out. One copy runs,
-    and the wet signal goes to both outputs.
-  - **Output R = None** gives stereo in to mono out on L.
+- **Stereo** (stereo specification): one copy of the capture runs in both
+  specifications, so stereo costs the same CPU as mono.
+  - **Stereo in:** (L + R) / 2 goes through the capture and the wet signal
+    goes to both outputs, while the dry signal stays stereo. It works like
+    a mono amp in a stereo rig.
+  - **Input R = None:** mono in to stereo out.
+  - **Output R = None:** stereo in to mono out on L.
+  - There is no dual-engine "true stereo" mode. Two copies of the capture
+    would need about 111% of the NT's CPU, since one copy measures about 56%.
 - **Drive CV**: an optional CV input that adds input gain at +6 dB per volt.
   It's read once per block.
 
@@ -95,15 +93,13 @@ A2 captures are trained at 48 kHz.
 
 ## Memory
 
-| Region | Mono | Stereo | Holds |
-|---|---|---|---|
-| DTC | 10.6 KB | 13.9 KB | capture weights (shared) + engine instances (the hot data) |
-| SRAM | 101 KB | 201 KB | the models' ring buffers |
-| DRAM | 47 KB | 47 KB | file list, parser, `.namb` buffer |
+| Region | Size | Holds |
+|---|---|---|
+| DTC | 10.6 KB | engine instance + capture weights (the hot data) |
+| SRAM | 101 KB | the model's ring buffers |
+| DRAM | 47 KB | file list, parser, `.namb` buffer |
 
-The stereo specification allocates the second engine even in Summed mode,
-so you can switch modes without re-adding the algorithm. Use the mono
-specification if memory is tight.
+The mono and stereo specifications use the same memory.
 
 Plug-in code: about 19 KB.
 
@@ -128,14 +124,12 @@ local folder standing in for the SD card. `test/run_tests.sh` runs all of it:
 - **Accuracy**: the plug-in end-to-end (bus in → gain → engine → bus out)
   versus NeuralAmpModelerCore's own output: **ESR −135 dB**, max error 2e-7,
   at 24- and 128-frame blocks.
-- **Stereo**: Dual, Summed, and mono in to stereo out all match the golden
-  output. In Dual, the R channel is bit-identical to a separate mono run, at
-  48 and 96 kHz.
+- **Stereo**: summed stereo in, and mono in to stereo out, both match the golden
+  output and a separate mono run, at 48 and 96 kHz.
 - **Behaviour**: preset recall by name, switching while running, bad files
   muting and reporting, recovery, mix, and gain staging maths, all at 48 and 96 kHz.
 
-Hardware: on a disting NT at 48 kHz, one copy (mono or Summed) uses about
-**55.6% CPU**, so Dual (two copies) overloads it.
+Hardware: on a disting NT at 48 kHz, NAM uses about **55.6% CPU**, in mono or stereo.
 
 ## Licences
 

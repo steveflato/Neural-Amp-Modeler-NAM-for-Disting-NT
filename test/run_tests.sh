@@ -24,22 +24,23 @@ v=10*np.log10((e**2).sum()/(b[:n]**2).sum()+1e-40); print('    %-34s ESR %7.1f d
 G=$EMB/test/golden_a2lite_output.raw
 R() { ./host_test render $W/namb_only 0 "$@" >/dev/null; }
 echo "== mono spec vs NeuralAmpModelerCore golden"
-for b in 24 128; do R 1 0 $W/in.f32 - $W/m.f32 - $b; esr $W/m.f32 $G 5 "block $b"; done
-echo "== stereo spec"
-R 2 0 $W/in.f32 $W/half.f32 $W/l.f32 $W/r.f32; R 1 0 $W/half.f32 - $W/mh.f32 -
-esr $W/l.f32 $G 5 "dual: L vs golden"; esr $W/r.f32 $W/mh.f32 1 "dual: R (half level) vs mono run"
-R 2 1 $W/in.f32 $W/in.f32 $W/l.f32 $W/r.f32
-esr $W/l.f32 $G 5 "summed L=R: L vs golden"; esr $W/r.f32 $G 5 "summed L=R: R vs golden"
-R 2 0 $W/in.f32 - $W/l.f32 $W/r.f32
+for b in 24 128; do R 1 $W/in.f32 - $W/m.f32 - $b; esr $W/m.f32 $G 5 "block $b"; done
+echo "== stereo spec (one engine, L+R summed)"
+R 2 $W/in.f32 $W/in.f32 $W/l.f32 $W/r.f32
+esr $W/l.f32 $G 5 "L=R: L vs golden"; esr $W/r.f32 $G 5 "L=R: R vs golden"
+python3 -c "
+import numpy as np; (np.fromfile('$W/in.f32',dtype=np.float32)*0.75).astype(np.float32).tofile('$W/q.f32')"
+R 2 $W/in.f32 $W/half.f32 $W/l.f32 $W/r.f32; R 1 $W/q.f32 - $W/mq.f32 -
+esr $W/l.f32 $W/mq.f32 1 "L, R=L/2: wet = mono run of (L+R)/2"; esr $W/r.f32 $W/mq.f32 1 "R output equals L output (wet)"
+R 2 $W/in.f32 - $W/l.f32 $W/r.f32
 esr $W/l.f32 $G 5 "mono in > stereo: L vs golden"; esr $W/r.f32 $G 5 "mono in > stereo: R vs golden"
-echo "== stereo spec @96k (dual R must equal a mono 96k run)"
+echo "== stereo spec @96k (must equal a mono 96k run)"
 python3 -c "
 import numpy as np, scipy.signal as s
-for f in ['in','half']: s.resample_poly(np.fromfile('$W/'+f+'.f32',dtype=np.float32),2,1).astype(np.float32).tofile('$W/'+f+'96.f32')"
-NT_SR=96000 ./host_test render $W/namb_only 0 2 0 $W/in96.f32 $W/half96.f32 $W/l.f32 $W/r.f32 >/dev/null
-NT_SR=96000 ./host_test render $W/namb_only 0 1 0 $W/half96.f32 - $W/mh.f32 - >/dev/null
-NT_SR=96000 ./host_test render $W/namb_only 0 1 0 $W/in96.f32 - $W/ml.f32 - >/dev/null
-esr $W/l.f32 $W/ml.f32 1 "dual 96k: L vs mono 96k"; esr $W/r.f32 $W/mh.f32 1 "dual 96k: R vs mono 96k"
+s.resample_poly(np.fromfile('$W/in.f32',dtype=np.float32),2,1).astype(np.float32).tofile('$W/in96.f32')"
+NT_SR=96000 ./host_test render $W/namb_only 0 2 $W/in96.f32 $W/in96.f32 $W/l.f32 $W/r.f32 >/dev/null
+NT_SR=96000 ./host_test render $W/namb_only 0 1 $W/in96.f32 - $W/ml.f32 - >/dev/null
+esr $W/l.f32 $W/ml.f32 1 "96k stereo L vs mono"; esr $W/r.f32 $W/ml.f32 1 "96k stereo R vs mono"
 echo "== behaviour @48k"; ./host_test misc $W/namdir
 echo "== behaviour @96k"; NT_SR=96000 ./host_test misc $W/namdir
 rm -rf $W
